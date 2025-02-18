@@ -86,6 +86,7 @@ def isolate_single_close_column(df, ticker=None):
     return df["Close"].dropna()
 
 
+@st.cache_data
 def get_score(df, resistance, target_decay=None, window=20):
     if target_decay is None:
         # linear decay
@@ -139,6 +140,7 @@ def get_score(df, resistance, target_decay=None, window=20):
     return score_above + score_maxima + score_reward
 
 
+@st.cache_data
 def find_local_maxima(series_or_df, window=2):
     """
     Finds local maxima by comparing each day's High with its neighbors in a ± 'window'.
@@ -167,6 +169,7 @@ def find_local_maxima(series_or_df, window=2):
     return pd.DataFrame({"Date": local_max_dates, "High": local_max_vals})
 
 
+@st.cache_data
 def determine_5_year_resistance(local_max_df, df, breakout_window, tolerance=0.03):
     """
     Clusters local maxima if they are within ± 'tolerance' in relative terms.
@@ -416,7 +419,7 @@ def main():
                 consecutive_days=consecutive_days,
             )
 
-        with st.expander(f"Ticker: {ticker}"):
+        with st.expander(f"Ticker: {ticker}", expanded=not (not info or not info["first_breakout"])):
             if info is None:
                 st.error(
                     "Analysis failed. Please check the parameters or try a different ticker."
