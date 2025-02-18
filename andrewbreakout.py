@@ -5,6 +5,7 @@ import numpy as np
 import mplfinance as mpf
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
+from sp500 import SP500_tickers
 
 
 # ================================
@@ -84,7 +85,8 @@ def isolate_single_close_column(df, ticker=None):
         raise ValueError("'Close' column not found.")
     return df["Close"].dropna()
 
-def get_score(df, resistance, target_decay = None, window = 20):
+
+def get_score(df, resistance, target_decay=None, window=20):
     if target_decay is None:
         # linear decay
         target_decay = lambda x: x
@@ -92,7 +94,7 @@ def get_score(df, resistance, target_decay = None, window = 20):
     prices = df["Close"]
 
     time_weights = np.array([target_decay(i / len(prices)) for i in range(len(prices))])
-    
+
     maxima_indices = []
     minima_indices = []
 
@@ -111,28 +113,31 @@ def get_score(df, resistance, target_decay = None, window = 20):
     for i in range(len(prices) - 1):
         price, next_price = prices[i], prices[i + 1]
         weight = time_weights[i]
-        dist_adjust = (1 + 100 * abs(price - resistance) / resistance)
+        dist_adjust = 1 + 100 * abs(price - resistance) / resistance
 
-        # (1) **Penalty for being above resistance, especially when increasing**
         if price > resistance:
             penalty = dist_adjust
             if next_price > price:
-                penalty *= 1.5  
+                penalty *= 1.5
             score_above -= penalty
 
-        # (2) **Reward for local maxima near resistance**
         if i in maxima_indices:
-            if dist_adjust < 3:  # If within 2% of resistance
+            if dist_adjust < 4:  # If within 3% of resistance
                 score_reward += (1 / dist_adjust) * 600 * window * weight
 
-        # (3) **Penalty for local minima above resistance or maxima below resistance**
         if i in minima_indices and price > resistance:
             score_maxima -= dist_adjust * 5 * window
-        if i in maxima_indices and price < resistance:
-            score_maxima -= dist_adjust * 5 * window
 
-    print(resistance, score_above, score_reward, score_maxima)
+    #print(
+    #    resistance,
+    #    score_above,
+    #    score_maxima,
+    #    score_reward,
+    #    score_above + score_maxima + score_reward,
+    #)
+
     return score_above + score_maxima + score_reward
+
 
 def find_local_maxima(series_or_df, window=2):
     """
@@ -161,7 +166,8 @@ def find_local_maxima(series_or_df, window=2):
 
     return pd.DataFrame({"Date": local_max_dates, "High": local_max_vals})
 
-def determine_5_year_resistance(local_max_df, df, tolerance=0.03):
+
+def determine_5_year_resistance(local_max_df, df, breakout_window, tolerance=0.03):
     """
     Clusters local maxima if they are within ± 'tolerance' in relative terms.
     Picks the cluster with the most touches (ties => cluster with the highest average).
@@ -175,12 +181,23 @@ def determine_5_year_resistance(local_max_df, df, tolerance=0.03):
         return None
 
     # cluster_info is a list of tuples: (average_price_of_cluster, cluster_size)
-    cluster_info = [(c, get_score(df, c)) for c in highs]
+    cluster_info = [
+        (
+            c,
+            get_score(
+                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)], c
+            ),
+        )
+        for c in sorted(highs)
+    ]
     # Choose the cluster with the most touches; break ties by highest average
-    best_cluster = max(cluster_info, key=lambda x: (x[1], x[0]))
+    clusters = sorted(cluster_info, key=lambda x: (x[1], x[0]))
+    best_cluster = clusters[-1]
 
     return best_cluster[0]
 
+
+@st.cache_data
 def find_clustered_resistance_breakout(
     ticker,
     lookback_years=5,
@@ -217,7 +234,9 @@ def find_clustered_resistance_breakout(
     if local_max_df.empty:
         return None
 
-    cluster_res = determine_5_year_resistance(local_max_df, df, tolerance=tolerance)
+    cluster_res = determine_5_year_resistance(
+        local_max_df, df, breakout_window, tolerance=tolerance
+    )
     if cluster_res is None:
         return None
 
@@ -332,496 +351,6 @@ def display_stock_with_resistance_return(info_dict):
 
 
 # ================================
-# TICKERS LIST
-# ================================
-tickers = [
-    "MMM",
-    "AOS",
-    "ABT",
-    "ABBV",
-    "ACN",
-    "ADM",
-    "ADBE",
-    "ADP",
-    "AAP",
-    "AES",
-    "AFL",
-    "A",
-    "APD",
-    "AKAM",
-    "ALK",
-    "ALB",
-    "ARE",
-    "ALGN",
-    "ALLE",
-    "LNT",
-    "ALL",
-    "GOOGL",
-    "GOOG",
-    "MO",
-    "AMZN",
-    "AMCR",
-    "AMD",
-    "AEE",
-    "AAL",
-    "AEP",
-    "AXP",
-    "AIG",
-    "AMT",
-    "AWK",
-    "AMP",
-    "AME",
-    "AMGN",
-    "APH",
-    "ADI",
-    "ANSS",
-    "AON",
-    "APA",
-    "AAPL",
-    "AMAT",
-    "APTV",
-    "ACGL",
-    "ANET",
-    "AJG",
-    "AIZ",
-    "T",
-    "ATO",
-    "ADSK",
-    "AZO",
-    "AVB",
-    "AVY",
-    "AXON",
-    "BKR",
-    "BALL",
-    "BAC",
-    "BBWI",
-    "BAX",
-    "BDX",
-    "WRB",
-    "BBY",
-    "BIO",
-    "TECH",
-    "BIIB",
-    "BLK",
-    "BK",
-    "BA",
-    "BKNG",
-    "BWA",
-    "BXP",
-    "BSX",
-    "BMY",
-    "AVGO",
-    "BR",
-    "BRO",
-    "CHRW",
-    "CDNS",
-    "CZR",
-    "CPT",
-    "CPB",
-    "COF",
-    "CAH",
-    "KMX",
-    "CCL",
-    "CARR",
-    "CTLT",
-    "CAT",
-    "CBOE",
-    "CBRE",
-    "CDW",
-    "CE",
-    "CNC",
-    "CNP",
-    "CF",
-    "CRL",
-    "SCHW",
-    "CHTR",
-    "CVX",
-    "CMG",
-    "CB",
-    "CHD",
-    "CI",
-    "CINF",
-    "CTAS",
-    "CSCO",
-    "C",
-    "CFG",
-    "CLX",
-    "CME",
-    "CMS",
-    "KO",
-    "CTSH",
-    "CL",
-    "CMCSA",
-    "CMA",
-    "CAG",
-    "COP",
-    "ED",
-    "STZ",
-    "CEG",
-    "COO",
-    "CPRT",
-    "GLW",
-    "CTVA",
-    "CSGP",
-    "COST",
-    "CTRA",
-    "CCI",
-    "CSX",
-    "CMI",
-    "CVS",
-    "DHI",
-    "DHR",
-    "DRI",
-    "DVA",
-    "DE",
-    "DAL",
-    "XRAY",
-    "DVN",
-    "DXCM",
-    "FANG",
-    "DLR",
-    "DFS",
-    "DIS",
-    "DG",
-    "DLTR",
-    "D",
-    "DPZ",
-    "DOV",
-    "DOW",
-    "DTE",
-    "DUK",
-    "DD",
-    "DXC",
-    "EMN",
-    "ETN",
-    "EBAY",
-    "ECL",
-    "EIX",
-    "EW",
-    "EA",
-    "ELV",
-    "LLY",
-    "EMR",
-    "ENPH",
-    "ETR",
-    "EOG",
-    "EFX",
-    "EQIX",
-    "EQR",
-    "ESS",
-    "EL",
-    "ETSY",
-    "EG",
-    "EVRG",
-    "ES",
-    "EXC",
-    "EXPE",
-    "EXPD",
-    "EXR",
-    "XOM",
-    "FFIV",
-    "FDS",
-    "FAST",
-    "FRT",
-    "FDX",
-    "FITB",
-    "FE",
-    "FIS",
-    "FMC",
-    "F",
-    "FTNT",
-    "FTV",
-    "FOXA",
-    "FOX",
-    "BEN",
-    "FCX",
-    "GEN",
-    "GRMN",
-    "IT",
-    "GEHC",
-    "GE",
-    "GIS",
-    "GM",
-    "GPC",
-    "GILD",
-    "GL",
-    "GPN",
-    "GS",
-    "HAL",
-    "HBI",
-    "HAS",
-    "HCA",
-    "HSIC",
-    "HES",
-    "HPE",
-    "HLT",
-    "HOLX",
-    "HD",
-    "HON",
-    "HRL",
-    "HST",
-    "HWM",
-    "HPQ",
-    "HUM",
-    "HBAN",
-    "HII",
-    "IBM",
-    "IEX",
-    "IDXX",
-    "INFO",
-    "ITW",
-    "ILMN",
-    "INCY",
-    "IR",
-    "INTC",
-    "ICE",
-    "IFF",
-    "IP",
-    "IPG",
-    "INTU",
-    "ISRG",
-    "IVZ",
-    "INVH",
-    "IQV",
-    "IRM",
-    "JBHT",
-    "JKHY",
-    "J",
-    "JNJ",
-    "JCI",
-    "JPM",
-    "JNPR",
-    "K",
-    "KDP",
-    "KEY",
-    "KEYS",
-    "KMB",
-    "KIM",
-    "KMI",
-    "KLAC",
-    "KHC",
-    "KR",
-    "LHX",
-    "LH",
-    "LRCX",
-    "LW",
-    "LVS",
-    "LDOS",
-    "LEN",
-    "LNC",
-    "LIN",
-    "LYV",
-    "LKQ",
-    "LMT",
-    "L",
-    "LOW",
-    "LYB",
-    "MTB",
-    "MPC",
-    "MKTX",
-    "MAR",
-    "MMC",
-    "MLM",
-    "MAS",
-    "MA",
-    "MTCH",
-    "MKC",
-    "MCD",
-    "MCK",
-    "MDT",
-    "MRK",
-    "META",
-    "MET",
-    "MTD",
-    "MGM",
-    "MCHP",
-    "MU",
-    "MSFT",
-    "MAA",
-    "MRNA",
-    "MHK",
-    "MOH",
-    "TAP",
-    "MDLZ",
-    "MPWR",
-    "MNST",
-    "MCO",
-    "MS",
-    "MOS",
-    "MSI",
-    "MSCI",
-    "NDAQ",
-    "NTAP",
-    "NFLX",
-    "NWL",
-    "NEM",
-    "NWSA",
-    "NWS",
-    "NEE",
-    "NKE",
-    "NI",
-    "NDSN",
-    "NSC",
-    "NTRS",
-    "NOC",
-    "NCLH",
-    "NRG",
-    "NUE",
-    "NVDA",
-    "NVR",
-    "NXPI",
-    "ORLY",
-    "OXY",
-    "ODFL",
-    "OMC",
-    "ON",
-    "OKE",
-    "ORCL",
-    "OGN",
-    "OTIS",
-    "PCAR",
-    "PKG",
-    "PARA",
-    "PH",
-    "PAYX",
-    "PAYC",
-    "PYPL",
-    "PNR",
-    "PEP",
-    "PFE",
-    "PCG",
-    "PM",
-    "PSX",
-    "PNW",
-    "PNC",
-    "POOL",
-    "PPG",
-    "PPL",
-    "PFG",
-    "PG",
-    "PGR",
-    "PLD",
-    "PRU",
-    "PTC",
-    "PEG",
-    "PSA",
-    "PHM",
-    "QRVO",
-    "PWR",
-    "QCOM",
-    "DGX",
-    "RL",
-    "RJF",
-    "RTX",
-    "O",
-    "REG",
-    "REGN",
-    "RF",
-    "RSG",
-    "RMD",
-    "RHI",
-    "ROK",
-    "ROL",
-    "ROP",
-    "ROST",
-    "RCL",
-    "SPGI",
-    "CRM",
-    "SBAC",
-    "SLB",
-    "STX",
-    "SEE",
-    "SRE",
-    "NOW",
-    "SHW",
-    "SBNY",
-    "SPG",
-    "SWKS",
-    "SJM",
-    "SNA",
-    "SEDG",
-    "SO",
-    "LUV",
-    "SWK",
-    "SBUX",
-    "STT",
-    "STE",
-    "SYK",
-    "SYF",
-    "SNPS",
-    "SYY",
-    "TMUS",
-    "TROW",
-    "TTWO",
-    "TPR",
-    "TGT",
-    "TEL",
-    "TDY",
-    "TFX",
-    "TER",
-    "TSLA",
-    "TXN",
-    "TXT",
-    "TMO",
-    "TJX",
-    "TSCO",
-    "TT",
-    "TDG",
-    "TRV",
-    "TRMB",
-    "TFC",
-    "TYL",
-    "TSN",
-    "USB",
-    "UDR",
-    "ULTA",
-    "UAA",
-    "UA",
-    "UNP",
-    "UAL",
-    "UNH",
-    "UPS",
-    "URI",
-    "UHS",
-    "VLO",
-    "VTR",
-    "VRSN",
-    "VRSK",
-    "VZ",
-    "VRTX",
-    "VFC",
-    "VTRS",
-    "V",
-    "VNO",
-    "VMC",
-    "WAB",
-    "WMT",
-    "WBA",
-    "WBD",
-    "WM",
-    "WAT",
-    "WEC",
-    "WFC",
-    "WELL",
-    "WST",
-    "WDC",
-    "WY",
-    "WHR",
-    "WMB",
-    "WTW",
-    "GWW",
-    "WYNN",
-    "XEL",
-    "XYL",
-    "YUM",
-    "ZBRA",
-    "ZBH",
-    "ZION",
-    "ZTS",
-]
-
-
-# ================================
 # MAIN APP
 # ================================
 def main():
@@ -830,84 +359,64 @@ def main():
         "This app analyzes selected stocks for resistance breakouts using yfinance data."
     )
 
-    # 2) Sidebar for analysis parameters
-    st.sidebar.header("Analysis Parameters")
-    selected_ticker = st.sidebar.selectbox(
-        "Select a ticker (or ALL)", ["ALL"] + sorted(tickers)
-    )
-    lookback_years = st.sidebar.slider(
-        "Lookback Years", min_value=1, max_value=10, value=5
-    )
-    tolerance = (
-        st.sidebar.slider("Cluster Tolerance (%)", min_value=1, max_value=10, value=3)
-        / 100.0
-    )
-    breakout_window = st.sidebar.slider(
+    lookback_years = 5
+    tolerance = 0.03
+    window = 20
+    breakout_window = st.slider(
         "Breakout Window (months)", min_value=1, max_value=24, value=6
     )
-    window = st.sidebar.slider(
-        "Local Maxima Neighbor Window", min_value=1, max_value=100, value=20
-    )
-    margin = (
-        st.sidebar.slider("Breakout Margin (%)", min_value=1, max_value=20, value=8)
-        / 100.0
-    )
-    consecutive_days = st.sidebar.slider(
-        "Consecutive Days", min_value=1, max_value=30, value=8
-    )
+    margin = 0.08
+    consecutive_days = 8
 
-    # 3) Analysis Button
-    if st.button("Analyze"):
-        if selected_ticker == "ALL":
-            st.info("Analyzing ALL tickers. This might take a while...")
-            for ticker in sorted(tickers):
-                info = find_clustered_resistance_breakout(
-                    ticker=ticker,
-                    lookback_years=lookback_years,
-                    tolerance=tolerance,
-                    breakout_window=breakout_window,
-                    window=window,
-                    margin=margin,
-                    consecutive_days=consecutive_days,
-                )
-                # Only display tickers that have a valid breakout
-                if info is None or info["first_breakout"] is None:
-                    continue
+    selected_ticker = st.text_input("Input Ticker")
 
-                with st.expander(f"Results for {ticker}"):
-                    res = info["resistance"]
-                    thr = res * (1 + info["margin"])
-                    bdate = info["first_breakout"]
-                    bprice = info["first_breakout_price"]
+    options = ["Example Stocks", "Random Selection"]
 
-                    st.subheader(f"Ticker: {ticker}")
-                    st.write(f"**Resistance:** {res:.2f}")
-                    st.write(f"**Threshold:** {thr:.2f}")
-                    if bdate:
-                        st.write(
-                            f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}"
-                        )
-                    else:
-                        st.write(
-                            "**No valid breakout found** in the specified breakout window."
-                        )
+    selected_choice = st.selectbox("Select view option", options)
 
-                    st.write("#### Chart")
-                    fig = display_stock_with_resistance_return(info)
-                    st.pyplot(fig)
+    ss = st.session_state
+    tickers = []
 
-        else:
-            with st.spinner("Downloading data and performing analysis..."):
-                info = find_clustered_resistance_breakout(
-                    ticker=selected_ticker,
-                    lookback_years=lookback_years,
-                    tolerance=tolerance,
-                    breakout_window=breakout_window,
-                    window=window,
-                    margin=margin,
-                    consecutive_days=consecutive_days,
-                )
+    if "rerun_rand" not in ss:
+        ss.rerun_rand = True
 
+    if selected_choice == options[0]:
+        tickers = ["RJF", "ADP", "HPE", "MS", "UHS"]
+    if selected_choice == options[1]:
+        if ss.rerun_rand:
+            ss.tickers = np.random.choice(SP500_tickers, 20, replace=False)
+            ss.rerun_rand = False
+        tickers = ss.tickers
+    else:
+        ss.rerun_rand = True
+    if selected_ticker:
+        tickers = [selected_ticker]
+
+    with st.expander("List of Tickers"):
+        st.text(tickers)
+
+    if "page" not in ss:
+        ss.page = 0
+
+    prev_button, next_button = st.columns(2)
+    if ss.page > 0 and prev_button.button("Prev"):
+        ss.page = ss.page - 1
+    if ss.page < len(tickers) / 5 - 1 and next_button.button("Next"):
+        ss.page = ss.page + 1
+
+    for ticker in tickers[5 * ss.page : 5 * ss.page + 5]:
+        with st.spinner("Downloading data and performing analysis..."):
+            info = find_clustered_resistance_breakout(
+                ticker=ticker,
+                lookback_years=lookback_years,
+                tolerance=tolerance,
+                breakout_window=breakout_window,
+                window=window,
+                margin=margin,
+                consecutive_days=consecutive_days,
+            )
+
+        with st.expander(f"Ticker: {ticker}"):
             if info is None:
                 st.error(
                     "Analysis failed. Please check the parameters or try a different ticker."
@@ -919,7 +428,6 @@ def main():
             bdate = info["first_breakout"]
             bprice = info["first_breakout_price"]
 
-            st.subheader(f"Ticker: {selected_ticker}")
             st.write(f"**Resistance:** {res:.2f}")
             st.write(f"**Threshold:** {thr:.2f}")
             if bdate:
@@ -933,10 +441,17 @@ def main():
             fig = display_stock_with_resistance_return(info)
             st.pyplot(fig)
 
-            if st.checkbox("Show Raw Data"):
-                st.dataframe(info["df_raw"])
+    for ticker in tickers:
+        info = find_clustered_resistance_breakout(
+            ticker=ticker,
+            lookback_years=lookback_years,
+            tolerance=tolerance,
+            breakout_window=breakout_window,
+            window=window,
+            margin=margin,
+            consecutive_days=consecutive_days,
+        )
 
 
 if __name__ == "__main__":
     main()
-
