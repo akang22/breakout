@@ -222,8 +222,13 @@ def find_clustered_resistance_breakout(
     end_date = datetime.now()
     start_date = end_date - timedelta(days=int(lookback_years * 365.25))
 
-    raw_df = yf.download(ticker, interval="1wk", start=start_date, end=end_date, progress=False)
+    raw_df = yf.download(ticker, interval="1d", start=start_date, end=end_date, progress=False)
     df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
+    df["RealClose"] = df["Close"]
+    df["Close"] = df["Close"].rolling(20).mean()
+    df["Open"] = df["Open"].rolling(20).mean()
+    df["High"] = df["High"].rolling(20).mean()
+    df["Low"] = df["Low"].rolling(20).mean()
 
     try:
         df_high = isolate_single_high_column(df)
@@ -295,8 +300,8 @@ def display_stock_with_resistance_return(info_dict):
     df_raw.index.name = "Date"
 
     # Calculate indicators: 20-day SMA and Bollinger Bands
-    df_raw["SMA20"] = df_raw["Close"].rolling(20).mean()
-    df_raw["STD20"] = df_raw["Close"].rolling(20).std()
+    df_raw["SMA20"] = df_raw["RealClose"].rolling(20).mean()
+    df_raw["STD20"] = df_raw["RealClose"].rolling(20).std()
     df_raw["UpperBB"] = df_raw["SMA20"] + 2 * df_raw["STD20"]
     df_raw["LowerBB"] = df_raw["SMA20"] - 2 * df_raw["STD20"]
 
