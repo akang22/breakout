@@ -87,12 +87,10 @@ def isolate_single_close_column(df, ticker=None):
 
 
 @st.cache_data
-def get_score(df, resistance, target_decay=None, window=20):
+def get_score(prices, resistance, target_decay=None, window=2):
     if target_decay is None:
         # linear decay
         target_decay = lambda x: x
-
-    prices = df["Close"]
 
     time_weights = np.array([target_decay(i / len(prices)) for i in range(len(prices))])
 
@@ -112,7 +110,7 @@ def get_score(df, resistance, target_decay=None, window=20):
     score_maxima = 0
 
     for i in range(len(prices) - 1):
-        price, next_price = prices[i], prices[i + 1]
+        price, next_price = prices.iloc[i], prices.iloc[i + 1]
         weight = time_weights[i]
         dist_adjust = 1 + 100 * abs(price - resistance) / resistance
 
@@ -129,13 +127,13 @@ def get_score(df, resistance, target_decay=None, window=20):
         if i in minima_indices and price > resistance:
             score_maxima -= dist_adjust * 5 * window
 
-    #print(
-    #    resistance,
-    #    score_above,
-    #    score_maxima,
-    #    score_reward,
-    #    score_above + score_maxima + score_reward,
-    #)
+    print(
+        resistance,
+        score_above,
+        score_maxima,
+        score_reward,
+        score_above + score_maxima + score_reward,
+    )
 
     return score_above + score_maxima + score_reward
 
@@ -170,7 +168,7 @@ def find_local_maxima(series_or_df, window=2):
 
 
 @st.cache_data
-def determine_5_year_resistance(local_max_df, df, breakout_window, tolerance=0.03):
+def determine_5_year_resistance(local_max_df, df, window, breakout_window, tolerance=0.03):
     """
     Clusters local maxima if they are within ± 'tolerance' in relative terms.
     Picks the cluster with the most touches (ties => cluster with the highest average).
@@ -188,7 +186,7 @@ def determine_5_year_resistance(local_max_df, df, breakout_window, tolerance=0.0
         (
             c,
             get_score(
-                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)], c
+                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)]["Close"], c, window=window
             ),
         )
         for c in sorted(highs)
@@ -206,9 +204,9 @@ def find_clustered_resistance_breakout(
     lookback_years=5,
     tolerance=0.03,
     breakout_window=15,  # months: ticker is only valid if first breakout is within these months
-    window=20,  # local maxima neighbor window
+    window=2,  # local maxima neighbor window
     margin=0.08,  # breakout threshold above resistance
-    consecutive_days=20,
+    consecutive_days=5,
 ):
     """
     1) Download ~5 yrs daily data for 'ticker'.
@@ -224,7 +222,7 @@ def find_clustered_resistance_breakout(
     end_date = datetime.now()
     start_date = end_date - timedelta(days=int(lookback_years * 365.25))
 
-    raw_df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+    raw_df = yf.download(ticker, interval="1wk", start=start_date, end=end_date, progress=False)
     df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
 
     try:
@@ -233,12 +231,12 @@ def find_clustered_resistance_breakout(
     except ValueError:
         return None
 
-    local_max_df = find_local_maxima(df_high, window=window)
+    local_max_df = find_local_maxima(df_close, window=window)
     if local_max_df.empty:
         return None
 
     cluster_res = determine_5_year_resistance(
-        local_max_df, df, breakout_window, tolerance=tolerance
+        local_max_df, df, window, breakout_window, tolerance=tolerance
     )
     if cluster_res is None:
         return None
@@ -306,7 +304,7 @@ def display_stock_with_resistance_return(info_dict):
     line_price = cluster_res
 
     apds = [
-        mpf.make_addplot(df_raw["SMA20"], color="blue", width=1),
+        mpf.make_addplot(df_raw["Close"], color="blue", width=1),
         mpf.make_addplot(df_raw["UpperBB"], color="grey", width=0.75),
         mpf.make_addplot(df_raw["LowerBB"], color="grey", width=0.75),
     ]
@@ -364,7 +362,7 @@ def main():
 
     lookback_years = 5
     tolerance = 0.03
-    window = 20
+    window = 2
     breakout_window = st.slider(
         "Breakout Window (months)", min_value=1, max_value=24, value=6
     )
