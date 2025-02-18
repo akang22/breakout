@@ -5,11 +5,6 @@ import numpy as np
 import mplfinance as mpf
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-from support_resistance.pricelevels.cluster import RawPriceClusterLevels
-from support_resistance.pricelevels.visualization.levels_on_candlestick import (
-    plot_levels_on_candlestick,
-)
-from support_resistance.pricelevels.scoring.touch_scorer import TouchScorer
 
 
 # ================================
