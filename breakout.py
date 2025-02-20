@@ -5,10 +5,17 @@ import numpy as np
 import mplfinance as mpf
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
+from support_resistance.pricelevels.cluster import RawPriceClusterLevels
+from support_resistance.pricelevels.visualization.levels_on_candlestick import (
+    plot_levels_on_candlestick,
+)
+from support_resistance.pricelevels.scoring.touch_scorer import TouchScorer
+
 
 # ================================
 # FUNCTIONS
 # ================================
+
 
 def flatten_and_sanitize(df, ticker=None):
     """
@@ -60,6 +67,7 @@ def flatten_and_sanitize(df, ticker=None):
 
     return df
 
+
 def isolate_single_high_column(df, ticker=None):
     """
     Ensures 'df' has exactly one 'High' column.
@@ -70,6 +78,7 @@ def isolate_single_high_column(df, ticker=None):
         raise ValueError("'High' column not found.")
     return df["High"].dropna()
 
+
 def isolate_single_close_column(df, ticker=None):
     """
     Ensures 'df' has exactly one 'Close' column.
@@ -79,6 +88,7 @@ def isolate_single_close_column(df, ticker=None):
     if "Close" not in df.columns:
         raise ValueError("'Close' column not found.")
     return df["Close"].dropna()
+
 
 def find_local_maxima(series_or_df, window=2):
     """
@@ -143,10 +153,10 @@ def find_clustered_resistance_breakout(
     ticker,
     lookback_years=5,
     tolerance=0.03,
-    breakout_window=3,  # months: ticker is only valid if first breakout is within these months
-    window=2,           # local maxima neighbor window
-    margin=0.01,        # breakout threshold above resistance
-    consecutive_days=2,
+    breakout_window=15,  # months: ticker is only valid if first breakout is within these months
+    window=20,  # local maxima neighbor window
+    margin=0.08,  # breakout threshold above resistance
+    consecutive_days=20,
 ):
     """
     1) Download ~5 yrs daily data for 'ticker'.
@@ -164,7 +174,7 @@ def find_clustered_resistance_breakout(
 
     raw_df = yf.download(ticker, start=start_date, end=end_date, progress=False)
     df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
-    
+
     try:
         df_high = isolate_single_high_column(df)
         df_close = isolate_single_close_column(df)
@@ -186,7 +196,7 @@ def find_clustered_resistance_breakout(
 
     breakout_threshold = cluster_res * (1 + margin)
     above_line = df_close_recent > breakout_threshold
-    rolling_sum = above_line.rolling(window=consecutive_days).sum()
+    rolling_sum = above_line[::-1].rolling(window=consecutive_days).sum()[::-1]
     breakout_mask = rolling_sum == consecutive_days
 
     df_breakouts = df_close_recent[breakout_mask]
@@ -217,6 +227,7 @@ def find_clustered_resistance_breakout(
 
     return info_dict
 
+
 def display_stock_with_resistance_return(info_dict):
     """
     Creates a candlestick chart with additional technical overlays and a horizontal
@@ -238,7 +249,7 @@ def display_stock_with_resistance_return(info_dict):
     df_raw["LowerBB"] = df_raw["SMA20"] - 2 * df_raw["STD20"]
 
     # Use breakout price if available; otherwise, use resistance
-    line_price = first_breakout_price if first_breakout_price else cluster_res
+    line_price = cluster_res
 
     apds = [
         mpf.make_addplot(df_raw["SMA20"], color="blue", width=1),
@@ -266,7 +277,9 @@ def display_stock_with_resistance_return(info_dict):
     )
 
     if first_breakout_date:
-        title_str = f"{ticker}: Breakout on {first_breakout_date} @ {first_breakout_price:.2f}"
+        title_str = (
+            f"{ticker}: Breakout on {first_breakout_date} @ {first_breakout_price:.2f}"
+        )
     else:
         title_str = f"{ticker}: No breakout (Resistance={cluster_res:.2f})"
 
@@ -285,97 +298,531 @@ def display_stock_with_resistance_return(info_dict):
     )
     return fig
 
+
 # ================================
 # TICKERS LIST
 # ================================
 tickers = [
-    "MMM", "ABT", "ABBV", "ACN", "ATVI", "ADBE", "AAP", "AES", "AFL", "A",
-    "APD", "ALK", "ALB", "ARE", "ALGN", "ALL", "GOOGL", "GOOG", "MO", "AMZN",
-    "AMCR", "AAL", "AEP", "AXP", "AIG", "AMT", "AWK", "AMP", "ABC", "AME",
-    "AMGN", "APH", "ADI", "ANSS", "ANTM", "AON", "AAPL", "AMAT", "APTV", "ADM",
-    "ANET", "AJG", "AIZ", "T", "ATO", "ADSK", "ADP", "AZO", "AVB", "BKR",
-    "BALL", "BAC", "BBWI", "BAX", "BDX", "BRK.B", "BBY", "BIIB", "BLK", "SQ",
-    "BA", "BKNG", "BWA", "BXP", "BSX", "BMY", "AVGO", "BRO", "BF.B", "CHRW",
-    "CDNS", "CPB", "COF", "CAH", "KMX", "CCL", "CARR", "CAT", "CBOE", "CBRE",
-    "CDW", "CE", "CNC", "CNP", "CDAY", "CF", "SCHW", "CHTR", "CVX", "CMG",
-    "CB", "CHD", "CI", "CINF", "CTAS", "CSCO", "C", "CFG", "CLX", "CME", "CMS",
-    "KO", "CTSH", "CL", "CMCSA", "CAG", "COP", "ED", "STZ", "COO", "CPRT",
-    "GLW", "CTVA", "CSGP", "COST", "CSX", "CMI", "CVS", "DHI", "DHR", "DRI",
-    "DVA", "DE", "DAL", "DXCM", "FANG", "DLR", "DFS", "DISCA", "DISH", "DG",
-    "DLTR", "D", "DPZ", "DOV", "DOW", "DTE", "DUK", "DD", "DXC", "EMN", "ETN",
-    "EBAY", "ECL", "EIX", "EW", "EA", "LLY", "EMR", "ETR", "EPAM", "EFX",
-    "EQIX", "EQR", "ESS", "EL", "ETSY", "EVRG", "ES", "EXC", "EXPE", "EXPD",
-    "EXR", "XOM", "FFIV", "FAST", "FRT", "FDX", "FIS", "FITB", "FE", "FISV",
-    "FLT", "FMC", "F", "FTNT", "FTV", "FBIN", "BEN", "FCX", "GD", "GE", "GIS",
-    "GM", "GPC", "GILD", "GPN", "GS", "HAL", "HIG", "HAS", "HCA", "PEAK",
-    "HEI", "HSY", "HES", "HPQ", "HLT", "HD", "HON", "HRL", "HST", "HWM",
-    "HUM", "HBAN", "HII", "IBM", "IEX", "IDXX", "ITW", "ILMN", "IR", "INTC",
-    "ICE", "IP", "IPG", "INTU", "ISRG", "IQV", "IRM", "JKHY", "J", "JNJ",
-    "JCI", "JPM", "K", "KEY", "KMB", "KIM", "KMI", "KLAC", "KHC", "KR", "LHX",
-    "LH", "LW", "LVS", "LEG", "LEN", "LNC", "LYV", "LKQ", "LMT", "LOW", "LULU",
-    "LYB", "MPC", "MA", "MCD", "META"
+    "MMM",
+    "AOS",
+    "ABT",
+    "ABBV",
+    "ACN",
+    "ADM",
+    "ADBE",
+    "ADP",
+    "AAP",
+    "AES",
+    "AFL",
+    "A",
+    "APD",
+    "AKAM",
+    "ALK",
+    "ALB",
+    "ARE",
+    "ALGN",
+    "ALLE",
+    "LNT",
+    "ALL",
+    "GOOGL",
+    "GOOG",
+    "MO",
+    "AMZN",
+    "AMCR",
+    "AMD",
+    "AEE",
+    "AAL",
+    "AEP",
+    "AXP",
+    "AIG",
+    "AMT",
+    "AWK",
+    "AMP",
+    "AME",
+    "AMGN",
+    "APH",
+    "ADI",
+    "ANSS",
+    "AON",
+    "APA",
+    "AAPL",
+    "AMAT",
+    "APTV",
+    "ACGL",
+    "ANET",
+    "AJG",
+    "AIZ",
+    "T",
+    "ATO",
+    "ADSK",
+    "AZO",
+    "AVB",
+    "AVY",
+    "AXON",
+    "BKR",
+    "BALL",
+    "BAC",
+    "BBWI",
+    "BAX",
+    "BDX",
+    "WRB",
+    "BBY",
+    "BIO",
+    "TECH",
+    "BIIB",
+    "BLK",
+    "BK",
+    "BA",
+    "BKNG",
+    "BWA",
+    "BXP",
+    "BSX",
+    "BMY",
+    "AVGO",
+    "BR",
+    "BRO",
+    "CHRW",
+    "CDNS",
+    "CZR",
+    "CPT",
+    "CPB",
+    "COF",
+    "CAH",
+    "KMX",
+    "CCL",
+    "CARR",
+    "CTLT",
+    "CAT",
+    "CBOE",
+    "CBRE",
+    "CDW",
+    "CE",
+    "CNC",
+    "CNP",
+    "CF",
+    "CRL",
+    "SCHW",
+    "CHTR",
+    "CVX",
+    "CMG",
+    "CB",
+    "CHD",
+    "CI",
+    "CINF",
+    "CTAS",
+    "CSCO",
+    "C",
+    "CFG",
+    "CLX",
+    "CME",
+    "CMS",
+    "KO",
+    "CTSH",
+    "CL",
+    "CMCSA",
+    "CMA",
+    "CAG",
+    "COP",
+    "ED",
+    "STZ",
+    "CEG",
+    "COO",
+    "CPRT",
+    "GLW",
+    "CTVA",
+    "CSGP",
+    "COST",
+    "CTRA",
+    "CCI",
+    "CSX",
+    "CMI",
+    "CVS",
+    "DHI",
+    "DHR",
+    "DRI",
+    "DVA",
+    "DE",
+    "DAL",
+    "XRAY",
+    "DVN",
+    "DXCM",
+    "FANG",
+    "DLR",
+    "DFS",
+    "DIS",
+    "DG",
+    "DLTR",
+    "D",
+    "DPZ",
+    "DOV",
+    "DOW",
+    "DTE",
+    "DUK",
+    "DD",
+    "DXC",
+    "EMN",
+    "ETN",
+    "EBAY",
+    "ECL",
+    "EIX",
+    "EW",
+    "EA",
+    "ELV",
+    "LLY",
+    "EMR",
+    "ENPH",
+    "ETR",
+    "EOG",
+    "EFX",
+    "EQIX",
+    "EQR",
+    "ESS",
+    "EL",
+    "ETSY",
+    "EG",
+    "EVRG",
+    "ES",
+    "EXC",
+    "EXPE",
+    "EXPD",
+    "EXR",
+    "XOM",
+    "FFIV",
+    "FDS",
+    "FAST",
+    "FRT",
+    "FDX",
+    "FITB",
+    "FE",
+    "FIS",
+    "FMC",
+    "F",
+    "FTNT",
+    "FTV",
+    "FOXA",
+    "FOX",
+    "BEN",
+    "FCX",
+    "GEN",
+    "GRMN",
+    "IT",
+    "GEHC",
+    "GE",
+    "GIS",
+    "GM",
+    "GPC",
+    "GILD",
+    "GL",
+    "GPN",
+    "GS",
+    "HAL",
+    "HBI",
+    "HAS",
+    "HCA",
+    "HSIC",
+    "HES",
+    "HPE",
+    "HLT",
+    "HOLX",
+    "HD",
+    "HON",
+    "HRL",
+    "HST",
+    "HWM",
+    "HPQ",
+    "HUM",
+    "HBAN",
+    "HII",
+    "IBM",
+    "IEX",
+    "IDXX",
+    "INFO",
+    "ITW",
+    "ILMN",
+    "INCY",
+    "IR",
+    "INTC",
+    "ICE",
+    "IFF",
+    "IP",
+    "IPG",
+    "INTU",
+    "ISRG",
+    "IVZ",
+    "INVH",
+    "IQV",
+    "IRM",
+    "JBHT",
+    "JKHY",
+    "J",
+    "JNJ",
+    "JCI",
+    "JPM",
+    "JNPR",
+    "K",
+    "KDP",
+    "KEY",
+    "KEYS",
+    "KMB",
+    "KIM",
+    "KMI",
+    "KLAC",
+    "KHC",
+    "KR",
+    "LHX",
+    "LH",
+    "LRCX",
+    "LW",
+    "LVS",
+    "LDOS",
+    "LEN",
+    "LNC",
+    "LIN",
+    "LYV",
+    "LKQ",
+    "LMT",
+    "L",
+    "LOW",
+    "LYB",
+    "MTB",
+    "MPC",
+    "MKTX",
+    "MAR",
+    "MMC",
+    "MLM",
+    "MAS",
+    "MA",
+    "MTCH",
+    "MKC",
+    "MCD",
+    "MCK",
+    "MDT",
+    "MRK",
+    "META",
+    "MET",
+    "MTD",
+    "MGM",
+    "MCHP",
+    "MU",
+    "MSFT",
+    "MAA",
+    "MRNA",
+    "MHK",
+    "MOH",
+    "TAP",
+    "MDLZ",
+    "MPWR",
+    "MNST",
+    "MCO",
+    "MS",
+    "MOS",
+    "MSI",
+    "MSCI",
+    "NDAQ",
+    "NTAP",
+    "NFLX",
+    "NWL",
+    "NEM",
+    "NWSA",
+    "NWS",
+    "NEE",
+    "NKE",
+    "NI",
+    "NDSN",
+    "NSC",
+    "NTRS",
+    "NOC",
+    "NCLH",
+    "NRG",
+    "NUE",
+    "NVDA",
+    "NVR",
+    "NXPI",
+    "ORLY",
+    "OXY",
+    "ODFL",
+    "OMC",
+    "ON",
+    "OKE",
+    "ORCL",
+    "OGN",
+    "OTIS",
+    "PCAR",
+    "PKG",
+    "PARA",
+    "PH",
+    "PAYX",
+    "PAYC",
+    "PYPL",
+    "PNR",
+    "PEP",
+    "PFE",
+    "PCG",
+    "PM",
+    "PSX",
+    "PNW",
+    "PNC",
+    "POOL",
+    "PPG",
+    "PPL",
+    "PFG",
+    "PG",
+    "PGR",
+    "PLD",
+    "PRU",
+    "PTC",
+    "PEG",
+    "PSA",
+    "PHM",
+    "QRVO",
+    "PWR",
+    "QCOM",
+    "DGX",
+    "RL",
+    "RJF",
+    "RTX",
+    "O",
+    "REG",
+    "REGN",
+    "RF",
+    "RSG",
+    "RMD",
+    "RHI",
+    "ROK",
+    "ROL",
+    "ROP",
+    "ROST",
+    "RCL",
+    "SPGI",
+    "CRM",
+    "SBAC",
+    "SLB",
+    "STX",
+    "SEE",
+    "SRE",
+    "NOW",
+    "SHW",
+    "SBNY",
+    "SPG",
+    "SWKS",
+    "SJM",
+    "SNA",
+    "SEDG",
+    "SO",
+    "LUV",
+    "SWK",
+    "SBUX",
+    "STT",
+    "STE",
+    "SYK",
+    "SYF",
+    "SNPS",
+    "SYY",
+    "TMUS",
+    "TROW",
+    "TTWO",
+    "TPR",
+    "TGT",
+    "TEL",
+    "TDY",
+    "TFX",
+    "TER",
+    "TSLA",
+    "TXN",
+    "TXT",
+    "TMO",
+    "TJX",
+    "TSCO",
+    "TT",
+    "TDG",
+    "TRV",
+    "TRMB",
+    "TFC",
+    "TYL",
+    "TSN",
+    "USB",
+    "UDR",
+    "ULTA",
+    "UAA",
+    "UA",
+    "UNP",
+    "UAL",
+    "UNH",
+    "UPS",
+    "URI",
+    "UHS",
+    "VLO",
+    "VTR",
+    "VRSN",
+    "VRSK",
+    "VZ",
+    "VRTX",
+    "VFC",
+    "VTRS",
+    "V",
+    "VNO",
+    "VMC",
+    "WAB",
+    "WMT",
+    "WBA",
+    "WBD",
+    "WM",
+    "WAT",
+    "WEC",
+    "WFC",
+    "WELL",
+    "WST",
+    "WDC",
+    "WY",
+    "WHR",
+    "WMB",
+    "WTW",
+    "GWW",
+    "WYNN",
+    "XEL",
+    "XYL",
+    "YUM",
+    "ZBRA",
+    "ZBH",
+    "ZION",
+    "ZTS",
 ]
 
-# ================================
-# DISPLAY BREAKOUT COMPARISON
-# ================================
-def display_breakout_comparison():
-    """
-    Shows a 5x2 table of images: Actual vs. Predicted Breakouts for 5 stocks.
-    """
-    st.header("Breakout Comparison for 5 Stocks")
-
-    # Updated image paths: now using .png
-    actual_breakout_images = [
-        "images/1a.png",
-        "images/2a.png",
-        "images/3a.png",
-        "images/4a.png",
-        "images/5a.png",
-    ]
-    predicted_breakout_images = [
-        "images/1b.png",
-        "images/2b.png",
-        "images/3b.png",
-        "images/4b.png",
-        "images/5b.png",
-    ]
-    
-    # Loop over each of the 5 pairs
-    for i in range(5):
-        cols = st.columns(2)
-        # Display the Actual Breakout in the left column
-        cols[0].image(
-            actual_breakout_images[i],
-            caption=f"Actual Breakout - Stock {i+1}",
-            use_container_width=True
-        )
-        # Display the Predicted Breakout in the right column
-        cols[1].image(
-            predicted_breakout_images[i],
-            caption=f"Predicted Breakout - Stock {i+1}",
-            use_container_width=True
-        )
 
 # ================================
 # MAIN APP
 # ================================
 def main():
     st.title("Clustered Resistance Breakout Analysis")
-    st.markdown("This app analyzes selected stocks for resistance breakouts using yfinance data.")
-    
-    # 1) Display the 5x2 breakout comparison table at the top
-    display_breakout_comparison()
+    st.markdown(
+        "This app analyzes selected stocks for resistance breakouts using yfinance data."
+    )
 
     # 2) Sidebar for analysis parameters
     st.sidebar.header("Analysis Parameters")
-    selected_ticker = st.sidebar.selectbox("Select a ticker (or ALL)", ["ALL"] + sorted(tickers))
-    lookback_years = st.sidebar.slider("Lookback Years", min_value=1, max_value=10, value=5)
-    tolerance = st.sidebar.slider("Cluster Tolerance (%)", min_value=1, max_value=10, value=3) / 100.0
-    breakout_window = st.sidebar.slider("Breakout Window (months)", min_value=1, max_value=24, value=3)
-    window = st.sidebar.slider("Local Maxima Neighbor Window", min_value=1, max_value=10, value=5)
-    margin = st.sidebar.slider("Breakout Margin (%)", min_value=1, max_value=20, value=8) / 100.0
-    consecutive_days = st.sidebar.slider("Consecutive Days", min_value=1, max_value=30, value=8)
+    selected_ticker = st.sidebar.selectbox(
+        "Select a ticker (or ALL)", ["ALL"] + sorted(tickers)
+    )
+    lookback_years = st.sidebar.slider(
+        "Lookback Years", min_value=1, max_value=10, value=5
+    )
+    tolerance = (
+        st.sidebar.slider("Cluster Tolerance (%)", min_value=1, max_value=10, value=3)
+        / 100.0
+    )
+    breakout_window = st.sidebar.slider(
+        "Breakout Window (months)", min_value=1, max_value=24, value=3
+    )
+    window = st.sidebar.slider(
+        "Local Maxima Neighbor Window", min_value=1, max_value=100, value=20
+    )
+    margin = (
+        st.sidebar.slider("Breakout Margin (%)", min_value=1, max_value=20, value=8)
+        / 100.0
+    )
+    consecutive_days = st.sidebar.slider(
+        "Consecutive Days", min_value=1, max_value=30, value=8
+    )
 
     # 3) Analysis Button
     if st.button("Analyze"):
@@ -405,9 +852,13 @@ def main():
                     st.write(f"**Resistance:** {res:.2f}")
                     st.write(f"**Threshold:** {thr:.2f}")
                     if bdate:
-                        st.write(f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}")
+                        st.write(
+                            f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}"
+                        )
                     else:
-                        st.write("**No valid breakout found** in the specified breakout window.")
+                        st.write(
+                            "**No valid breakout found** in the specified breakout window."
+                        )
 
                     st.write("#### Chart")
                     fig = display_stock_with_resistance_return(info)
@@ -426,7 +877,9 @@ def main():
                 )
 
             if info is None:
-                st.error("Analysis failed. Please check the parameters or try a different ticker.")
+                st.error(
+                    "Analysis failed. Please check the parameters or try a different ticker."
+                )
                 return
 
             res = info["resistance"]
@@ -440,7 +893,9 @@ def main():
             if bdate:
                 st.write(f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}")
             else:
-                st.write("**No valid breakout found** in the specified breakout window.")
+                st.write(
+                    "**No valid breakout found** in the specified breakout window."
+                )
 
             st.write("### Chart")
             fig = display_stock_with_resistance_return(info)
@@ -448,6 +903,7 @@ def main():
 
             if st.checkbox("Show Raw Data"):
                 st.dataframe(info["df_raw"])
+
 
 if __name__ == "__main__":
     main()

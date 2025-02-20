@@ -3,9 +3,11 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import mplfinance as mpf
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
+from datetime import datetime, timedelta, date
 from sp500 import SP500_tickers
+import plotly.graph_objects as go
+
+ss = st.session_state
 
 
 # ================================
@@ -86,11 +88,10 @@ def isolate_single_close_column(df, ticker=None):
     return df["Close"].dropna()
 
 
-@st.cache_data
-def get_score(prices, resistance, target_decay=None, window=2):
+def get_score(prices, resistance, target_decay=None, window=20):
     if target_decay is None:
         # linear decay
-        target_decay = lambda x: x
+        target_decay = lambda x: 1 / (2 ** (1 - x))
 
     time_weights = np.array([target_decay(i / len(prices)) for i in range(len(prices))])
 
@@ -105,9 +106,10 @@ def get_score(prices, resistance, target_decay=None, window=2):
         if current_val == neighborhood.min():
             minima_indices.append(i)
 
-    score_above = 0
+    score_above = -1000
     score_reward = 0
     score_maxima = 0
+    wearoff = 1
 
     for i in range(len(prices) - 1):
         price, next_price = prices.iloc[i], prices.iloc[i + 1]
@@ -115,25 +117,28 @@ def get_score(prices, resistance, target_decay=None, window=2):
         dist_adjust = 1 + 100 * abs(price - resistance) / resistance
 
         if price > resistance:
-            penalty = dist_adjust
+            penalty = dist_adjust / 7
             if next_price > price:
                 penalty *= 1.5
             score_above -= penalty
 
         if i in maxima_indices:
             if dist_adjust < 4:  # If within 3% of resistance
-                score_reward += (1 / dist_adjust) * 600 * window * weight
+                score_reward += (0.2 + (1 / dist_adjust)) * 200 * window * weight * wearoff
+                wearoff /= 2
+            elif dist_adjust > 6:
+                score_maxima -= (0.2 + dist_adjust / 100) * 100 * window * weight
 
-        if i in minima_indices and price > resistance:
-            score_maxima -= dist_adjust * 5 * window
+        wearoff += 0.01 * (1 - wearoff)
 
-    print(
-        resistance,
-        score_above,
-        score_maxima,
-        score_reward,
-        score_above + score_maxima + score_reward,
-    )
+    if "debug" in ss and ss["debug"]:
+        print(
+            resistance,
+            score_above,
+            score_maxima,
+            score_reward,
+            score_above + score_maxima + score_reward,
+        )
 
     return score_above + score_maxima + score_reward
 
@@ -167,8 +172,9 @@ def find_local_maxima(series_or_df, window=2):
     return pd.DataFrame({"Date": local_max_dates, "High": local_max_vals})
 
 
-@st.cache_data
-def determine_5_year_resistance(local_max_df, df, window, breakout_window, tolerance=0.03):
+def determine_5_year_resistance(
+    local_max_df, df, window, breakout_window, tolerance=0.03
+):
     """
     Clusters local maxima if they are within ± 'tolerance' in relative terms.
     Picks the cluster with the most touches (ties => cluster with the highest average).
@@ -186,7 +192,11 @@ def determine_5_year_resistance(local_max_df, df, window, breakout_window, toler
         (
             c,
             get_score(
-                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)]["Close"], c, window=window
+                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)][
+                    "Close"
+                ],
+                c,
+                window=window,
             ),
         )
         for c in sorted(highs)
@@ -195,10 +205,27 @@ def determine_5_year_resistance(local_max_df, df, window, breakout_window, toler
     clusters = sorted(cluster_info, key=lambda x: (x[1], x[0]))
     best_cluster = clusters[-1]
 
-    return best_cluster[0]
+    return best_cluster
 
 
 @st.cache_data
+def get_hprice(ticker, lookback_years=5):
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=int(lookback_years * 365.25))
+
+    raw_df = yf.download(
+        ticker, interval="1d", start=start_date, end=end_date, progress=False
+    )
+    df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
+    df["RealClose"] = df["Close"]
+    df["Close"] = df["Close"].rolling(20).mean()
+    df["Open"] = df["Open"].rolling(20).mean()
+    df["High"] = df["High"].rolling(20).mean()
+    df["Low"] = df["Low"].rolling(20).mean()
+    return df
+
+
+@st.cache_data(persist="disk")
 def find_clustered_resistance_breakout(
     ticker,
     lookback_years=5,
@@ -207,6 +234,7 @@ def find_clustered_resistance_breakout(
     window=2,  # local maxima neighbor window
     margin=0.08,  # breakout threshold above resistance
     consecutive_days=5,
+    cur_day=str(date.today()),  # use for cache
 ):
     """
     1) Download ~5 yrs daily data for 'ticker'.
@@ -219,22 +247,11 @@ def find_clustered_resistance_breakout(
        within the last 'breakout_window' months.
     6) Return dict of relevant info.
     """
+    df = get_hprice(ticker, lookback_years=lookback_years)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=int(lookback_years * 365.25))
 
-    raw_df = yf.download(ticker, interval="1d", start=start_date, end=end_date, progress=False)
-    df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
-    df["RealClose"] = df["Close"]
-    df["Close"] = df["Close"].rolling(20).mean()
-    df["Open"] = df["Open"].rolling(20).mean()
-    df["High"] = df["High"].rolling(20).mean()
-    df["Low"] = df["Low"].rolling(20).mean()
-
-    try:
-        df_high = isolate_single_high_column(df)
-        df_close = isolate_single_close_column(df)
-    except ValueError:
-        return None
+    df_high = isolate_single_high_column(df)
+    df_close = isolate_single_close_column(df)
 
     local_max_df = find_local_maxima(df_close, window=window)
     if local_max_df.empty:
@@ -246,35 +263,39 @@ def find_clustered_resistance_breakout(
     if cluster_res is None:
         return None
 
-    # Always use a fixed 15-month lookback period for breakout detection
-    breakout_lookback_months = 15
-    breakout_start = end_date - timedelta(days=30 * breakout_lookback_months)
-    df_close_recent = df_close[df_close.index >= breakout_start]
+    valid_breakout, valid_breakout_price, breakout_dates = None, None, None
+    if cluster_res[1] > 0:
+        # Always use a fixed 15-month lookback period for breakout detection
+        breakout_lookback_months = 15
+        breakout_start = end_date - timedelta(days=30 * breakout_lookback_months)
+        df_close_recent = df_close[df_close.index >= breakout_start]
 
-    breakout_threshold = cluster_res * (1 + margin)
-    above_line = df_close_recent > breakout_threshold
-    rolling_sum = above_line[::-1].rolling(window=consecutive_days).sum()[::-1]
-    breakout_mask = rolling_sum == consecutive_days
+        breakout_threshold = cluster_res[0] * (1 + margin)
+        above_line = df_close_recent > breakout_threshold
+        rolling_sum = above_line[::-1].rolling(window=consecutive_days).sum()[::-1]
+        breakout_mask = rolling_sum == consecutive_days
 
-    df_breakouts = df_close_recent[breakout_mask]
-    breakout_dates = df_breakouts.index.strftime("%Y-%m-%d").tolist()
+        df_breakouts = df_close_recent[breakout_mask]
+        breakout_dates = df_breakouts.index.strftime("%Y-%m-%d").tolist()
 
-    # Validate breakout: only consider valid if the first breakout is within
-    # the last breakout_window months
-    valid_breakout = None
-    valid_breakout_price = None
-    if not df_breakouts.empty:
-        first_breakout_date = df_breakouts.index[0]
-        if first_breakout_date >= end_date - timedelta(days=30 * breakout_window):
-            valid_breakout = first_breakout_date.strftime("%Y-%m-%d")
-            valid_breakout_price = float(df_breakouts.iloc[0])
+        # Validate breakout: only consider valid if the first breakout is within
+        # the last breakout_window months
+        valid_breakout = None
+        valid_breakout_price = None
+        if not df_breakouts.empty:
+            first_breakout_date = df_breakouts.index[0]
+            if first_breakout_date >= end_date - timedelta(days=30 * breakout_window):
+                valid_breakout = first_breakout_date.strftime("%Y-%m-%d")
+                valid_breakout_price = float(df_breakouts.iloc[0])
 
     info_dict = {
         "ticker": ticker,
         "df_high": df_high,
         "df_close": df_close,
         "df_raw": df,
-        "resistance": cluster_res,
+        "resistance": cluster_res[0],
+        "has_resistance": cluster_res[1] > 0,
+        "resistance_score": cluster_res[1],
         "margin": margin,
         "consecutive_days": consecutive_days,
         "first_breakout": valid_breakout,
@@ -287,8 +308,7 @@ def find_clustered_resistance_breakout(
 
 def display_stock_with_resistance_return(info_dict):
     """
-    Creates a candlestick chart with additional technical overlays and a horizontal
-    resistance line. Returns the matplotlib figure.
+    Creates an interactive Plotly candlestick chart with resistance, SMA, Bollinger Bands, and breakout markers.
     """
     ticker = info_dict["ticker"]
     df_raw = info_dict["df_raw"].copy()
@@ -296,64 +316,82 @@ def display_stock_with_resistance_return(info_dict):
     first_breakout_price = info_dict["first_breakout_price"]
     cluster_res = info_dict["resistance"]
 
-    # Ensure the index name is 'Date'
-    df_raw.index.name = "Date"
+    # Ensure the index is a DateTimeIndex
+    df_raw.index = pd.to_datetime(df_raw.index)
 
-    # Calculate indicators: 20-day SMA and Bollinger Bands
-    df_raw["SMA20"] = df_raw["RealClose"].rolling(20).mean()
-    df_raw["STD20"] = df_raw["RealClose"].rolling(20).std()
-    df_raw["UpperBB"] = df_raw["SMA20"] + 2 * df_raw["STD20"]
-    df_raw["LowerBB"] = df_raw["SMA20"] - 2 * df_raw["STD20"]
-
-    # Use breakout price if available; otherwise, use resistance
     line_price = cluster_res
 
-    apds = [
-        mpf.make_addplot(df_raw["Close"], color="blue", width=1),
-        mpf.make_addplot(df_raw["UpperBB"], color="grey", width=0.75),
-        mpf.make_addplot(df_raw["LowerBB"], color="grey", width=0.75),
-    ]
+    # Create the candlestick chart
+    fig = go.Figure()
 
-    # Add a marker for the breakout day if applicable
-    if first_breakout_date and first_breakout_price:
-        ts = pd.to_datetime(first_breakout_date)
-        if ts in df_raw.index:
-            idx = df_raw.index.get_loc(ts)
-            scatter_data = [np.nan] * len(df_raw)
-            scatter_data[idx] = first_breakout_price
-            apds.append(
-                mpf.make_addplot(
-                    scatter_data, type="scatter", marker="^", markersize=100, color="g"
-                )
-            )
+    fig.add_trace(go.Scatter(x=df_raw.index, y=df_raw["Close"], name="SMA20"))
 
-    hline_dict = dict(
-        hlines=[line_price],
-        colors="red",
-        linestyle="--",
-    )
-
-    if first_breakout_date:
-        title_str = (
-            f"{ticker}: Breakout on {first_breakout_date} @ {first_breakout_price:.2f}"
+    # Add resistance/breakout line
+    fig.add_trace(
+        go.Scatter(
+            x=[df_raw.index.min(), df_raw.index.max()],
+            y=[line_price, line_price],
+            mode="lines",
+            line=dict(color="red", width=1.5, dash="dash"),
+            name="Resistance",
         )
-    else:
-        title_str = f"{ticker}: No breakout (Resistance={cluster_res:.2f})"
-
-    fig, ax = mpf.plot(
-        df_raw,
-        type="candle",
-        style="yahoo",
-        volume=True,
-        addplot=apds,
-        hlines=hline_dict,
-        title=title_str,
-        figratio=(12, 6),
-        figscale=1.1,
-        warn_too_much_data=9999999,
-        returnfig=True,
     )
+
+    # Add breakout marker if applicable
+    if first_breakout_date and first_breakout_price:
+        fig.add_trace(
+            go.Scatter(
+                x=[first_breakout_date],
+                y=[first_breakout_price],
+                mode="markers",
+                marker=dict(color="green", symbol="triangle-up", size=10),
+                name="Breakout",
+            )
+        )
+
+    # Set chart title
+    title_str = (
+        f"{ticker}: Breakout on {first_breakout_date} @ {first_breakout_price:.2f}"
+        if first_breakout_date
+        else f"{ticker}: No breakout (Resistance={cluster_res:.2f})"
+    )
+
+    fig.update_layout(
+        # title=title_str,
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        height=600,
+    )
+
     return fig
+
+
+def show_modal(info):
+    if not info["has_resistance"]:
+        st.write("**No valid resistance found**")
+        st.write(f"**Best possible resistance:** {info['resistance']:.2f}")
+        st.write(f"**Score:** {info['resistance_score']:.2f}")
+        fig = display_stock_with_resistance_return(info)
+        st.plotly_chart(fig)
+        return
+
+    res = info["resistance"]
+    thr = res * (1 + info["margin"])
+    bdate = info["first_breakout"]
+    bprice = info["first_breakout_price"]
+
+    st.write(f"**Resistance:** {res:.2f}")
+    st.write(f"**Score:** {info['resistance_score']:.2f}")
+    st.write(f"**Threshold:** {thr:.2f}")
+    if bdate:
+        st.write(f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}")
+    else:
+        st.write("**No valid breakout found** in the specified breakout window.")
+
+    fig = display_stock_with_resistance_return(info)
+    st.plotly_chart(fig)
 
 
 # ================================
@@ -367,7 +405,7 @@ def main():
 
     lookback_years = 5
     tolerance = 0.03
-    window = 2
+    window = 10
     breakout_window = st.slider(
         "Breakout Window (months)", min_value=1, max_value=24, value=6
     )
@@ -396,6 +434,7 @@ def main():
     else:
         ss.rerun_rand = True
     if selected_ticker:
+        ss.debug = True
         tickers = [selected_ticker]
 
     with st.expander("List of Tickers"):
@@ -422,30 +461,10 @@ def main():
                 consecutive_days=consecutive_days,
             )
 
-        with st.expander(f"Ticker: {ticker}", expanded=not (not info or not info["first_breakout"])):
-            if info is None:
-                st.error(
-                    "Analysis failed. Please check the parameters or try a different ticker."
-                )
-                return
-
-            res = info["resistance"]
-            thr = res * (1 + info["margin"])
-            bdate = info["first_breakout"]
-            bprice = info["first_breakout_price"]
-
-            st.write(f"**Resistance:** {res:.2f}")
-            st.write(f"**Threshold:** {thr:.2f}")
-            if bdate:
-                st.write(f"**Breakout Date:** {bdate} at **Price:** {bprice:.2f}")
-            else:
-                st.write(
-                    "**No valid breakout found** in the specified breakout window."
-                )
-
-            st.write("### Chart")
-            fig = display_stock_with_resistance_return(info)
-            st.pyplot(fig)
+        with st.expander(
+            f"Ticker: {ticker}", expanded=not (not info or not info["first_breakout"])
+        ):
+            show_modal(info)
 
     for ticker in tickers:
         info = find_clustered_resistance_breakout(
