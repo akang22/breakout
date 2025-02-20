@@ -106,7 +106,7 @@ def get_score(prices, resistance, target_decay=None, window=20):
         if current_val == neighborhood.min():
             minima_indices.append(i)
 
-    score_above = -1000
+    score_above = 0
     score_reward = 0
     score_maxima = 0
     wearoff = 1
