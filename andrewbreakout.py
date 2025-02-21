@@ -111,25 +111,28 @@ def get_score(prices, resistance, target_decay=None, window=20):
     score_maxima = 0
     wearoff = 1
 
+    cap = 1
+
     for i in range(len(prices) - 1):
         price, next_price = prices.iloc[i], prices.iloc[i + 1]
         weight = time_weights[i]
         dist_adjust = 1 + 100 * abs(price - resistance) / resistance
 
         if price > resistance:
-            penalty = dist_adjust / 7
+            penalty = dist_adjust / 3.5
             if next_price > price:
                 penalty *= 1.5
             score_above -= penalty
 
         if i in maxima_indices:
-            if dist_adjust < 4:  # If within 3% of resistance
-                score_reward += (0.2 + (1 / dist_adjust)) * 200 * window * weight * wearoff
-                wearoff /= 2
-            elif dist_adjust > 6:
-                score_maxima -= (0.2 + dist_adjust / 100) * 100 * window * weight
+            if dist_adjust < 3:  # If within 2% of resistance
+                score_reward += (1 + (0.5 / dist_adjust)) * 100 * window * weight * wearoff
+                wearoff = 0
+                cap += 2
+            elif dist_adjust > 7:
+                score_maxima -= (0.2 + dist_adjust / 50) * 40 * window * weight
 
-        wearoff += 0.01 * (1 - wearoff)
+        wearoff += 0.001 * (cap - wearoff)
 
     if "debug" in ss and ss["debug"]:
         print(
