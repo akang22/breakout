@@ -90,7 +90,6 @@ SP500_tickers = [
     "KMX",
     "CCL",
     "CARR",
-    "CTLT",
     "CAT",
     "CBOE",
     "CBRE",
