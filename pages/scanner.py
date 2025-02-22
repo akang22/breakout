@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import streamlit as st 
 import yfinance as yf
 
@@ -44,27 +45,21 @@ def main():
     else:
         ss.rerun_rand = True
 
-    if "page" not in ss:
-        ss.page = 0
-
-    prev_button, next_button = st.columns(2)
-    if ss.page > 0 and prev_button.button("Prev"):
-        ss.page = ss.page - 1
-    if ss.page < len(tickers) / 5 - 1 and next_button.button("Next"):
-        ss.page = ss.page + 1
-
     if "results" not in ss:
-        ss.results = []
+        ss.results = {}
 
-    filtered = [res for res in ss.results if res and res["first_breakout"]]
-    if len(filtered) >= 5 * ss.page:
-        for info in filtered[5 * ss.page:5*ss.page + 5]:
-            with st.expander(f"Ticker: {info['ticker']}"):
-                andrewbreakout.show_modal(info)
+    @st.experimental_fragment(run_every=1)
+    def show_tickers():
+        st.text(f"Percentage of stocks that broke out: {len([info for info in ss.results.values() if info and info['first_breakout']]) / len(tickers):.2%}")
+        st.header("All tickers (download):")
+        df= pd.DataFrame([key for key, res in ss.results.items() if res and res["first_breakout"]])
+        st.dataframe(df.transpose())
 
-    for ticker in tickers[len(ss.results):]:
-        with st.spinner(f"Checking: {ticker}"):
-            info = andrewbreakout.find_clustered_resistance_breakout(
+    show_tickers()
+
+    for ticker in tickers:
+        if ticker not in ss.results:
+            ss.results[ticker] = andrewbreakout.find_clustered_resistance_breakout(
                 ticker=ticker,
                 lookback_years=lookback_years,
                 tolerance=tolerance,
@@ -73,15 +68,11 @@ def main():
                 margin=margin,
                 consecutive_days=consecutive_days,
             )
-        ss.results.append(info)
 
-        filtered = [res for res in ss.results if res and res["first_breakout"]]
+        info = ss.results[ticker]
 
-        if 5 * ss.page < len(filtered) <= 5 * ss.page + 5 and info and info["first_breakout"]:
-            with st.expander(f"Ticker: {ticker}"):
+        if info and info["first_breakout"]:
+            with st.expander(f"Ticker: {ticker}", expanded=True):
                 andrewbreakout.show_modal(info)
-
-    st.header("All tickers (download):")
-    st.dataframe([res["ticker"] for res in ss.results if res and res["first_breakout"]])
 
 main()
