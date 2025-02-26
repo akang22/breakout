@@ -9,10 +9,15 @@ import tsx
 
 ss = st.session_state
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def is_valid_tsx(ticker):
-    info = yf.Ticker(ticker).info
-    return info['dayHigh'] > 3 and info['typeDisp'] == 'equity' and info['averageDailyVolume10Day'] > 50000
+    info = None
+    try:
+        info = yf.Ticker(ticker).info
+        return info['typeDisp'] == 'Equity' and info['dayHigh'] > 3 and info['averageDailyVolume10Day'] > 50000
+    except Exception as e:
+        print(f"issue with {ticker}")
+        return False
 
 def main():
     options = ["SP500", "Filtered TSX", "Random 20"]
@@ -31,12 +36,12 @@ def main():
     margin = 0.08
     consecutive_days = 8
 
-
     tickers = []
     if selected_choice == options[0]:
         tickers = sp500.SP500_tickers
     if selected_choice == options[1]:
-        tickers = [ticker for ticker in tsx.TSX_tickers if is_valid_tsx(ticker)]
+        with st.spinner("Filtering TSX tickers..."):
+            tickers = [ticker for ticker in tsx.TSX_tickers if is_valid_tsx(ticker)]
     if selected_choice == options[2]:
         if ss.rerun_rand:
             ss.tickers = np.random.choice(sp500.SP500_tickers, 20, replace=False)
@@ -45,11 +50,14 @@ def main():
     else:
         ss.rerun_rand = True
 
-    if "results" not in ss:
-        ss.results = {}
+
+    ss.results = {}
 
     @st.experimental_fragment(run_every=1)
     def show_tickers():
+        if len(ss.results.values()) < len(tickers):
+            st.text(f"{len(tickers)} tickers found, scanning...")
+            return
         st.text(f"Percentage of stocks that broke out: {len([info for info in ss.results.values() if info and info['first_breakout']]) / len(tickers):.2%}")
         st.header("All tickers (download):")
         df= pd.DataFrame([key for key, res in ss.results.items() if res and res["first_breakout"]])
@@ -58,18 +66,17 @@ def main():
     show_tickers()
 
     for ticker in tickers:
-        if ticker not in ss.results:
-            ss.results[ticker] = andrewbreakout.find_clustered_resistance_breakout(
-                ticker=ticker,
-                lookback_years=lookback_years,
-                tolerance=tolerance,
-                breakout_window=breakout_window,
-                window=window,
-                margin=margin,
-                consecutive_days=consecutive_days,
-            )
+        info = andrewbreakout.find_clustered_resistance_breakout(
+            ticker=ticker,
+            lookback_years=lookback_years,
+            tolerance=tolerance,
+            breakout_window=breakout_window,
+            window=window,
+            margin=margin,
+            consecutive_days=consecutive_days,
+        )
 
-        info = ss.results[ticker]
+        ss.results[ticker] = info
 
         if info and info["first_breakout"]:
             with st.expander(f"Ticker: {ticker}", expanded=True):
