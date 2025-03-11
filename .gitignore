@@ -1,2 +1,3 @@
 *.pyc
+.streamlit
 __pycache__

@@ -1,12 +1,16 @@
 import requests
 import pandas as pd
+import streamlit as st
 
 # URL of the TSX interlisted companies list
 def get_tsx():
-    url = "https://www.tsx.com/files/trading/interlisted-companies.txt"
+    API_KEY = st.secrets["FMP"]
+
+    url = f"https://financialmodelingprep.com/api/v3/stock-screener?exchange=TSX&apikey={API_KEY}&isEtf=false&isFund=false&priceMoreThan=3&volumeMoreThan=50000"
     response = requests.get(url)
-    data = response.text
-    lines = [line for line in data.split("\n") if line.strip()]
-    return [line.split("\t")[0].split(":")[0] for line in lines[3:]]
+    data = response.json()
+
+    return [val['symbol'] for val in data]
+
 
 TSX_tickers = get_tsx()

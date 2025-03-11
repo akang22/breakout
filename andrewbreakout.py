@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 import mplfinance as mpf
@@ -40,15 +40,15 @@ def flatten_and_sanitize(df, ticker=None):
     col_map = {}
     for c in df.columns:
         c_lower = c.lower()
-        if "open" in c_lower:
+        if "open" == c_lower:
             col_map[c] = "Open"
-        elif "high" in c_lower:
+        elif "high" == c_lower:
             col_map[c] = "High"
-        elif "low" in c_lower:
+        elif "low" == c_lower:
             col_map[c] = "Low"
-        elif "close" in c_lower and "adj" not in c_lower:
+        elif "close" == c_lower:
             col_map[c] = "Close"
-        elif "volume" in c_lower:
+        elif "volume" == c_lower:
             col_map[c] = "Volume"
     df.rename(columns=col_map, inplace=True)
 
@@ -61,7 +61,10 @@ def flatten_and_sanitize(df, ticker=None):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Drop rows with NaN in any essential column
-    df.dropna(subset=existing, inplace=True)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+
+    df = df.dropna(subset=existing)
 
     return df
 
@@ -212,13 +215,23 @@ def determine_5_year_resistance(
 
 
 @st.cache_data
-def get_hprice(ticker, lookback_years=5):
+def get_hprice(ticker, is_tsx=False, lookback_years=5):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=int(lookback_years * 365.25))
 
-    raw_df = yf.download(
-        ticker, interval="1d", start=start_date, end=end_date, progress=False
-    )
+    API_KEY = st.secrets["FMP"]
+
+    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={start_date}&to={end_date}&apikey={API_KEY}"
+
+    # looks like unneeded
+    #if is_tsx:
+    #    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/tsx/{ticker}.TO?from={start_date}&to={end_date}&apikey={API_KEY}"
+
+    response = requests.get(url)
+    data = response.json()
+
+    raw_df = pd.DataFrame(data['historical'])
+
     df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
     df["RealClose"] = df["Close"]
     df["Close"] = df["Close"].rolling(20).mean()
@@ -403,7 +416,7 @@ def show_modal(info):
 def main():
     st.title("Clustered Resistance Breakout Analysis")
     st.markdown(
-        "This app analyzes selected stocks for resistance breakouts using yfinance data."
+        "This app analyzes selected stocks for resistance breakouts using fmp data."
     )
 
     lookback_years = 5

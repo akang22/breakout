@@ -9,16 +9,6 @@ import tsx
 
 ss = st.session_state
 
-@st.cache_data(persist="disk")
-def is_valid_tsx(ticker):
-    info = None
-    try:
-        info = yf.Ticker(ticker).info
-        return info['typeDisp'] == 'Equity' and info['dayHigh'] > 3 and info['averageDailyVolume10Day'] > 50000
-    except Exception as e:
-        print(f"issue with {ticker}")
-        return False
-
 def main():
     options = ["SP500", "Filtered TSX", "Random 20"]
 
@@ -41,7 +31,7 @@ def main():
         tickers = sp500.SP500_tickers
     if selected_choice == options[1]:
         with st.spinner("Filtering TSX tickers..."):
-            tickers = [ticker for ticker in tsx.TSX_tickers if is_valid_tsx(ticker)]
+            tickers = [ticker for ticker in tsx.TSX_tickers]
     if selected_choice == options[2]:
         if ss.rerun_rand:
             ss.tickers = np.random.choice(sp500.SP500_tickers, 20, replace=False)
