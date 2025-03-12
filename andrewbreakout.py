@@ -233,6 +233,8 @@ def get_hprice(ticker, is_tsx=False, lookback_years=5):
     raw_df = pd.DataFrame(data['historical'])
 
     df = flatten_and_sanitize(raw_df.copy(), ticker=ticker)
+    df = df.reindex(index=df.index[::-1])
+
     df["RealClose"] = df["Close"]
     df["Close"] = df["Close"].rolling(20).mean()
     df["Open"] = df["Open"].rolling(20).mean()
@@ -264,7 +266,7 @@ def find_clustered_resistance_breakout(
     6) Return dict of relevant info.
     """
     df = get_hprice(ticker, lookback_years=lookback_years)
-    end_date = datetime.now()
+    end_date = df.index.max()
 
     df_high = isolate_single_high_column(df)
     df_close = isolate_single_close_column(df)
@@ -281,8 +283,7 @@ def find_clustered_resistance_breakout(
 
     valid_breakout, valid_breakout_price, breakout_dates = None, None, None
     if cluster_res[1] > 0:
-        # Always use a fixed 15-month lookback period for breakout detection
-        breakout_lookback_months = 15
+        breakout_lookback_months = breakout_window
         breakout_start = end_date - timedelta(days=30 * breakout_lookback_months)
         df_close_recent = df_close[df_close.index >= breakout_start]
 
