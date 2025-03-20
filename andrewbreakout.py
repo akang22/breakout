@@ -1,4 +1,5 @@
 import streamlit as st
+import math
 import requests
 import pandas as pd
 import numpy as np
@@ -91,10 +92,10 @@ def isolate_single_close_column(df, ticker=None):
     return df["Close"].dropna()
 
 
-def get_score(prices, resistance, target_decay=None, window=20):
+def get_score(prices, resistance, target_decay=None, window=20, debug=False):
     if target_decay is None:
         # linear decay
-        target_decay = lambda x: 1 / (2 ** (1 - x))
+        target_decay = lambda x: 1 / (10 ** (1 - x))
 
     time_weights = np.array([target_decay(i / len(prices)) for i in range(len(prices))])
 
@@ -128,14 +129,22 @@ def get_score(prices, resistance, target_decay=None, window=20):
             score_above -= penalty
 
         if i in maxima_indices:
-            if dist_adjust < 3:  # If within 2% of resistance
-                score_reward += (1 + (0.5 / dist_adjust)) * 100 * window * weight * wearoff
+            if dist_adjust < 6:  # If within 5% of resistance
+                reward_val = min(700, (1 + (0.2 / dist_adjust)) * 150 * window * weight * wearoff)
+                score_reward += reward_val
+                if debug and "debug" in ss and ss["debug"]:
+                    print(f"reward of {reward_val } with {dist_adjust, wearoff} at {i / len(prices)}")
                 wearoff = 0
-                cap += 2
-            elif dist_adjust > 7:
-                score_maxima -= (0.2 + dist_adjust / 50) * 40 * window * weight
+                if wearoff >= 0.2:
+                    cap += 1
+            elif dist_adjust > 9:
+                punish_val = (dist_adjust - 7) * window * weight
+                score_maxima -= punish_val
+                if debug and "debug" in ss and ss["debug"]:
+                    # print(f"punish of {punish_val } with {dist_adjust} at {i / len(prices)}")
+                    pass
 
-        wearoff += 0.001 * (cap - wearoff)
+        wearoff += 0.01 * (cap - wearoff)
 
     if "debug" in ss and ss["debug"]:
         print(
@@ -193,23 +202,43 @@ def determine_5_year_resistance(
     if len(highs) == 0:
         return None
 
+    
+    def get_adaptive_intervals(highs, percent=4):
+        highs = sorted(set(highs))
+        result = [highs[0]]
+        low, high = min(highs), max(highs)
+        step = (high - low) * (percent / 100) 
+        
+        for cur in highs[1:]:
+            past = result[-1]
+            if cur - past > step:
+                num_steps = math.floor((cur - past) / step)
+                result += list(np.linspace(past, cur, num_steps + 1))[1:]
+
+        return result
+
+    candidates = get_adaptive_intervals(highs)
     # cluster_info is a list of tuples: (average_price_of_cluster, cluster_size)
+    score_run = df[df.index < datetime.now() - timedelta(days=breakout_window * 30)][
+                    "Close"
+                ]
     cluster_info = [
         (
             c,
             get_score(
-                df[df.index < datetime.now() - timedelta(days=breakout_window * 30)][
-                    "Close"
-                ],
+                score_run,
                 c,
                 window=window,
             ),
         )
-        for c in sorted(highs)
+        for c in sorted(candidates)
     ]
     # Choose the cluster with the most touches; break ties by highest average
     clusters = sorted(cluster_info, key=lambda x: (x[1], x[0]))
     best_cluster = clusters[-1]
+
+    get_score(score_run, best_cluster[0], window=window, debug=True)
+    get_score(score_run, 153, window=window, debug=True)
 
     return best_cluster
 
@@ -243,7 +272,7 @@ def get_hprice(ticker, is_tsx=False, lookback_years=5):
     return df
 
 
-@st.cache_data(persist="disk")
+# @st.cache_data(persist="disk")
 def find_clustered_resistance_breakout(
     ticker,
     lookback_years=5,
