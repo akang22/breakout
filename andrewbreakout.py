@@ -272,7 +272,7 @@ def get_hprice(ticker, is_tsx=False, lookback_years=5):
     return df
 
 
-# @st.cache_data(persist="disk")
+@st.cache_data(persist="disk")
 def find_clustered_resistance_breakout(
     ticker,
     lookback_years=5,
