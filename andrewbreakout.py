@@ -238,7 +238,6 @@ def determine_5_year_resistance(
     best_cluster = clusters[-1]
 
     get_score(score_run, best_cluster[0], window=window, debug=True)
-    get_score(score_run, 153, window=window, debug=True)
 
     return best_cluster
 

@@ -70,12 +70,12 @@ def main():
             ss.results[ticker] = info
 
             if info and info["first_breakout"]:
-                st.text(info["first_breakout"])
                 with st.expander(f"Ticker: {ticker}", expanded=True):
                     andrewbreakout.show_modal(info)
         except Exception as e:
-            st.text(f"Received the following error with ticker {ticker}")
-            st.exception(e)
+            pass
+            # st.text(f"Received the following error with ticker {ticker}")
+            # st.exception(e)
 
 
 main()
